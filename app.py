@@ -46,7 +46,7 @@ def conectar_google_sheets():
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(secretos, scopes=scopes)
         client = gspread.authorize(creds)
-        sh = client.open("Mis Negocios Data") 
+        sh = client.open("Datos") 
         return sh
     except Exception as e:
         st.error(f"❌ Error al conectar: {e}")
@@ -139,6 +139,7 @@ if sh:
 
     except Exception as e:
         st.error(f"Error procesando datos: {e}")
+
 
 
 
