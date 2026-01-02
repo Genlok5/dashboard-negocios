@@ -2,9 +2,40 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+from datetime import datetime
 
-st.set_page_config(page_title="Monitor Negocios", layout="wide")
-st.title("📊 Monitor de Negocios en Vivo")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Monitor Negocios PRO", layout="wide")
+
+# --- 1. FUNCIÓN DE SEGURIDAD (CANDADO) ---
+def check_password():
+    """Retorna True si el usuario ingresó la clave correcta."""
+    if "password_correct" not in st.session_state:
+        st.session_state.password_correct = False
+
+    if st.session_state.password_correct:
+        return True
+
+    # Input de contraseña
+    st.title("🔒 Acceso Restringido")
+    pwd = st.text_input("Ingresa la contraseña maestra:", type="password")
+    
+    if st.button("Entrar"):
+        # Verifica contra los secrets que configuraste
+        if pwd == st.secrets["general"]["password"]:
+            st.session_state.password_correct = True
+            st.rerun() # Recarga la página
+        else:
+            st.error("Contraseña incorrecta")
+    return False
+
+# Si la contraseña no es correcta, detiene todo aquí
+if not check_password():
+    st.stop()
+
+# --- SI PASA EL CANDADO, MUESTRA EL RESTO ---
+
+st.sidebar.title("🎛️ Filtros") # Barra lateral
 
 def conectar_google_sheets():
     try:
@@ -15,9 +46,7 @@ def conectar_google_sheets():
         scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(secretos, scopes=scopes)
         client = gspread.authorize(creds)
-        
-        # Asegúrate que este nombre sea correcto
-        sh = client.open("Datos") 
+        sh = client.open("Mis Negocios Data") 
         return sh
     except Exception as e:
         st.error(f"❌ Error al conectar: {e}")
@@ -32,36 +61,85 @@ if sh:
         df = pd.DataFrame(datos)
 
         if not df.empty:
-            # --- LIMPIEZA DE DATOS (NUEVO) ---
-            # Si la columna Monto existe, le quitamos el signo $ y las comas
+            # --- LIMPIEZA DE DATOS ---
+            # 1. Limpiar dinero
             if 'Monto' in df.columns:
-                # Convertimos a texto, quitamos '$' y ',', y luego a número
                 df['Monto'] = df['Monto'].astype(str).str.replace('$', '').str.replace(',', '')
                 df['Monto'] = pd.to_numeric(df['Monto'])
-
-            # --- CÁLCULOS ---
-            if 'Monto' in df.columns and 'Tipo' in df.columns:
-                ingresos = df[df['Tipo'] == 'Ingreso']['Monto'].sum()
-                # Sumamos los gastos (asumiendo que en Excel ya pusiste el signo negativo o positivo)
-                # Si en tu excel los gastos son positivos (ej: 500), cámbialo a resta.
-                # Si son negativos (ej: -500), usa suma.
-                gastos = df[df['Tipo'] == 'Gasto']['Monto'].sum() 
-                
-                # Cálculo de ganancia
-                ganancia = ingresos + gastos if gastos < 0 else ingresos - gastos
-
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Ingresos Totales", f"${ingresos:,.2f}")
-                col2.metric("Gastos Totales", f"${abs(gastos):,.2f}") # abs() para mostrarlo positivo
-                col3.metric("Balance", f"${ganancia:,.2f}")
             
-            st.subheader("📋 Detalle de Movimientos")
-            st.dataframe(df)
+            # 2. Convertir Fechas (Vital para el filtro)
+            # Asumimos formato dia/mes/año (ej: 01/01/2026)
+            if 'Fecha' in df.columns:
+                df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True)
+
+            # --- FILTROS INTELIGENTES (SIDEBAR) ---
+            
+            # A. Filtro de Negocio
+            lista_negocios = ["Todos"] + list(df['Negocio'].unique())
+            negocio_seleccionado = st.sidebar.selectbox("Selecciona un Negocio:", lista_negocios)
+            
+            # B. Filtro de Fechas
+            min_date = df['Fecha'].min().date()
+            max_date = df['Fecha'].max().date()
+            
+            st.sidebar.write("Rango de Fechas:")
+            fecha_inicio = st.sidebar.date_input("Desde", min_date)
+            fecha_fin = st.sidebar.date_input("Hasta", max_date)
+
+            # --- APLICAR FILTROS ---
+            df_filtrado = df.copy()
+
+            # 1. Filtrar por negocio (si no es 'Todos')
+            if negocio_seleccionado != "Todos":
+                df_filtrado = df_filtrado[df_filtrado['Negocio'] == negocio_seleccionado]
+            
+            # 2. Filtrar por fechas (convertimos a datetime para comparar)
+            df_filtrado = df_filtrado[
+                (df_filtrado['Fecha'].dt.date >= fecha_inicio) & 
+                (df_filtrado['Fecha'].dt.date <= fecha_fin)
+            ]
+
+            # --- DASHBOARD PRINCIPAL ---
+            st.title(f"📊 Resultados: {negocio_seleccionado}")
+            st.markdown(f"*Mostrando datos del {fecha_inicio} al {fecha_fin}*")
+
+            if not df_filtrado.empty:
+                # Cálculos sobre datos FILTRADOS
+                ingresos = df_filtrado[df_filtrado['Tipo'] == 'Ingreso']['Monto'].sum()
+                gastos = df_filtrado[df_filtrado['Tipo'] == 'Gasto']['Monto'].sum()
+                balance = ingresos + gastos if gastos < 0 else ingresos - gastos
+
+                # Tarjetas
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Ingresos", f"${ingresos:,.2f}")
+                col2.metric("Gastos", f"${abs(gastos):,.2f}")
+                col3.metric("Ganancia Neta", f"${balance:,.2f}", 
+                            delta_color="normal")
+
+                # Gráficas y Tablas
+                tab1, tab2 = st.tabs(["📈 Gráficos", "📋 Tabla de Datos"])
+                
+                with tab1:
+                    # Gráfica de barras por día
+                    st.subheader("Ingresos por Día")
+                    datos_grafica = df_filtrado[df_filtrado['Tipo']=='Ingreso'].groupby('Fecha')['Monto'].sum()
+                    st.bar_chart(datos_grafica)
+                
+                with tab2:
+                    # Tabla con formato bonito
+                    # Regresamos la fecha a texto para que se lea bien
+                    df_show = df_filtrado.copy()
+                    df_show['Fecha'] = df_show['Fecha'].dt.strftime('%d/%m/%Y')
+                    st.dataframe(df_show, use_container_width=True)
+            else:
+                st.info("No hay datos para los filtros seleccionados.")
+
         else:
-            st.warning("La hoja está vacía.")
+            st.warning("Tu Excel está vacío.")
 
     except Exception as e:
-        st.error(f"Error al procesar datos: {e}")
+        st.error(f"Error procesando datos: {e}")
+
 
 
 
