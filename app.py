@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import gspread
+import numpy as np
+from sklearn.linear_model import LinearRegression
 from google.oauth2.service_account import Credentials
 from datetime import datetime
 
@@ -139,6 +141,33 @@ if sh:
 
     except Exception as e:
         st.error(f"Error procesando datos: {e}")
+st.divider()
+st.subheader("🔮 Predicción de Ventas")
+
+if not df.empty and 'Fecha' in df.columns and 'Monto' in df.columns:
+    # 1. Preparamos los datos para la IA
+    # Filtramos solo Ingresos
+    df_ingresos = df[df['Tipo'] == 'Ingreso'].copy()
+    
+    # La IA no entiende fechas, entiende números. Convertimos fecha a "Día del año"
+    df_ingresos['Dia_Numero'] = df_ingresos['Fecha'].map(datetime.toordinal)
+    
+    X = df_ingresos[['Dia_Numero']] # Fechas (Input)
+    y = df_ingresos['Monto']        # Dinero (Output)
+    
+    if len(df_ingresos) > 5: # Necesitamos al menos 5 datos para aprender
+        # 2. Entrenamos al modelo
+        modelo = LinearRegression()
+        modelo.fit(X, y)
+        
+        # 3. Predecimos el futuro (ej: próximos 7 días)
+        ultimo_dia = df_ingresos['Dia_Numero'].max()
+        futuro_dias = np.array([ultimo_dia + i for i in range(1, 8)]).reshape(-1, 1)
+        prediccion = modelo.predict(futuro_dias)
+        
+        st.write(f"Según la tendencia, mañana venderás aprox: **${prediccion[0]:,.2f}**")
+    else:
+        st.info("Necesitas más datos históricos para hacer predicciones.")
 
 
 
