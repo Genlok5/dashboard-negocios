@@ -1,0 +1,47 @@
+import streamlit as st
+import pandas as pd
+import gspread
+
+# Configuración de la página
+st.set_page_config(page_title="Mis 3 Negocios", layout="wide")
+
+# Título
+st.title("📊 Monitor de Negocios en Vivo")
+
+# CONEXIÓN (Modo Producción)
+try:
+    # Streamlit buscará las claves secretas en la nube, no en un archivo
+    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
+    
+    # CAMBIA ESTO POR EL NOMBRE EXACTO DE TU GOOGLE SHEET
+    sh = gc.open("Mis Negocios Data") 
+    
+    worksheet = sh.get_worksheet(0)
+    datos = worksheet.get_all_records()
+    df = pd.DataFrame(datos)
+
+    if not df.empty:
+        # Calcular totales (Asumiendo que tienes columnas 'Monto' y 'Tipo')
+        # Si tus columnas se llaman diferente, cambia 'Tipo' y 'Monto' aquí abajo
+        ingresos = df[df['Tipo'] == 'Ingreso']['Monto'].sum()
+        gastos = df[df['Tipo'] == 'Gasto']['Monto'].sum()
+        ganancia = ingresos - gastos
+
+        # Mostrar Tarjetas
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Ingresos", f"${ingresos:,.2f}")
+        col2.metric("Gastos", f"${gastos:,.2f}")
+        col3.metric("Ganancia Total", f"${ganancia:,.2f}")
+
+        # Mostrar Gráfica
+        st.subheader("Movimientos por Negocio")
+        st.bar_chart(df, x="Negocio", y="Monto")
+        
+        # Mostrar Tabla
+        with st.expander("Ver detalle de datos"):
+            st.dataframe(df)
+    else:
+        st.warning("Tu hoja de cálculo está vacía.")
+
+except Exception as e:
+    st.error(f"Error de conexión: {e}")
