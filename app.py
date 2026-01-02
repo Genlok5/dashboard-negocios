@@ -1,44 +1,15 @@
 import streamlit as st
 import pandas as pd
 import gspread
+from google.oauth2.service_account import Credentials
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from google.oauth2.service_account import Credentials
 from datetime import datetime
 
-# --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Monitor Negocios PRO", layout="wide")
+st.set_page_config(page_title="Monitor Inteligente", layout="wide")
+st.title("📊 Monitor de Negocios + IA 🧠")
 
-# --- 1. FUNCIÓN DE SEGURIDAD (CANDADO) ---
-def check_password():
-    """Retorna True si el usuario ingresó la clave correcta."""
-    if "password_correct" not in st.session_state:
-        st.session_state.password_correct = False
-
-    if st.session_state.password_correct:
-        return True
-
-    # Input de contraseña
-    st.title("🔒 Acceso Restringido")
-    pwd = st.text_input("Ingresa la contraseña maestra:", type="password")
-    
-    if st.button("Entrar"):
-        # Verifica contra los secrets que configuraste
-        if pwd == st.secrets["general"]["password"]:
-            st.session_state.password_correct = True
-            st.rerun() # Recarga la página
-        else:
-            st.error("Contraseña incorrecta")
-    return False
-
-# Si la contraseña no es correcta, detiene todo aquí
-if not check_password():
-    st.stop()
-
-# --- SI PASA EL CANDADO, MUESTRA EL RESTO ---
-
-st.sidebar.title("🎛️ Filtros") # Barra lateral
-
+# --- CONEXIÓN ---
 def conectar_google_sheets():
     try:
         secretos = dict(st.secrets["gcp_service_account"])
@@ -64,110 +35,86 @@ if sh:
 
         if not df.empty:
             # --- LIMPIEZA DE DATOS ---
-            # 1. Limpiar dinero
             if 'Monto' in df.columns:
                 df['Monto'] = df['Monto'].astype(str).str.replace('$', '').str.replace(',', '')
                 df['Monto'] = pd.to_numeric(df['Monto'])
             
-            # 2. Convertir Fechas (Vital para el filtro)
-            # Asumimos formato dia/mes/año (ej: 01/01/2026)
             if 'Fecha' in df.columns:
                 df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True)
 
-            # --- FILTROS INTELIGENTES (SIDEBAR) ---
-            
-            # A. Filtro de Negocio
-            lista_negocios = ["Todos"] + list(df['Negocio'].unique())
-            negocio_seleccionado = st.sidebar.selectbox("Selecciona un Negocio:", lista_negocios)
-            
-            # B. Filtro de Fechas
-            min_date = df['Fecha'].min().date()
-            max_date = df['Fecha'].max().date()
-            
-            st.sidebar.write("Rango de Fechas:")
-            fecha_inicio = st.sidebar.date_input("Desde", min_date)
-            fecha_fin = st.sidebar.date_input("Hasta", max_date)
-
-            # --- APLICAR FILTROS ---
-            df_filtrado = df.copy()
-
-            # 1. Filtrar por negocio (si no es 'Todos')
-            if negocio_seleccionado != "Todos":
-                df_filtrado = df_filtrado[df_filtrado['Negocio'] == negocio_seleccionado]
-            
-            # 2. Filtrar por fechas (convertimos a datetime para comparar)
-            df_filtrado = df_filtrado[
-                (df_filtrado['Fecha'].dt.date >= fecha_inicio) & 
-                (df_filtrado['Fecha'].dt.date <= fecha_fin)
-            ]
-
             # --- DASHBOARD PRINCIPAL ---
-            st.title(f"📊 Resultados: {negocio_seleccionado}")
-            st.markdown(f"*Mostrando datos del {fecha_inicio} al {fecha_fin}*")
+            # Filtro de Mes
+            df['Mes'] = df['Fecha'].dt.strftime('%Y-%m')
+            lista_meses = ["Todos"] + list(df['Mes'].unique())
+            mes_seleccionado = st.sidebar.selectbox("Filtrar por Mes:", lista_meses)
 
-            if not df_filtrado.empty:
-                # Cálculos sobre datos FILTRADOS
-                ingresos = df_filtrado[df_filtrado['Tipo'] == 'Ingreso']['Monto'].sum()
-                gastos = df_filtrado[df_filtrado['Tipo'] == 'Gasto']['Monto'].sum()
-                balance = ingresos + gastos if gastos < 0 else ingresos - gastos
+            df_filtrado = df.copy()
+            if mes_seleccionado != "Todos":
+                df_filtrado = df_filtrado[df_filtrado['Mes'] == mes_seleccionado]
 
-                # Tarjetas
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Ingresos", f"${ingresos:,.2f}")
-                col2.metric("Gastos", f"${abs(gastos):,.2f}")
-                col3.metric("Ganancia Neta", f"${balance:,.2f}", 
-                            delta_color="normal")
+            # KPIs
+            ingresos = df_filtrado[df_filtrado['Tipo'] == 'Ingreso']['Monto'].sum()
+            gastos = df_filtrado[df_filtrado['Tipo'] == 'Gasto']['Monto'].sum()
+            balance = ingresos + gastos if gastos < 0 else ingresos - gastos
 
-                # Gráficas y Tablas
-                tab1, tab2 = st.tabs(["📈 Gráficos", "📋 Tabla de Datos"])
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Ingresos", f"${ingresos:,.2f}")
+            col2.metric("Gastos", f"${abs(gastos):,.2f}")
+            col3.metric("Balance", f"${balance:,.2f}")
+
+            st.divider()
+
+            # --- SECCIÓN DE INTELIGENCIA ARTIFICIAL (NUEVO) ---
+            st.subheader("🔮 Oráculo de Predicción (IA)")
+            
+            # Solo predecimos si hay suficientes datos de Ingresos
+            df_ia = df[df['Tipo'] == 'Ingreso'].copy()
+            
+            if len(df_ia) >= 3: # Necesitamos mínimo 3 ventas para calcular tendencia
+                # 1. Preparar datos: La IA no entiende fechas, entiende "Día 1, Día 2..."
+                # Convertimos fecha a número ordinal
+                df_ia['Fecha_Num'] = df_ia['Fecha'].map(datetime.toordinal)
                 
-                with tab1:
-                    # Gráfica de barras por día
-                    st.subheader("Ingresos por Día")
-                    datos_grafica = df_filtrado[df_filtrado['Tipo']=='Ingreso'].groupby('Fecha')['Monto'].sum()
-                    st.bar_chart(datos_grafica)
+                X = df_ia[['Fecha_Num']] # Eje X (Tiempo)
+                y = df_ia['Monto']       # Eje Y (Dinero)
+
+                # 2. Entrenar Modelo
+                modelo = LinearRegression()
+                modelo.fit(X, y)
+
+                # 3. Calcular la Tendencia (Coeficiente)
+                tendencia = modelo.coef_[0]
                 
-                with tab2:
-                    # Tabla con formato bonito
-                    # Regresamos la fecha a texto para que se lea bien
-                    df_show = df_filtrado.copy()
-                    df_show['Fecha'] = df_show['Fecha'].dt.strftime('%d/%m/%Y')
-                    st.dataframe(df_show, use_container_width=True)
+                col_ia1, col_ia2 = st.columns(2)
+                
+                with col_ia1:
+                    st.info(f"📈 Tendencia diaria detectada: **${tendencia:,.2f} / día**")
+                    if tendencia > 0:
+                        st.write("Tu negocio está **creciendo** 🚀")
+                    else:
+                        st.write("Tu negocio está **decreciendo** 📉. ¡Cuidado!")
+
+                with col_ia2:
+                    # 4. Predecir el futuro (Mañana)
+                    ultimo_dia_conocido = df_ia['Fecha_Num'].max()
+                    mañana = np.array([[ultimo_dia_conocido + 1]])
+                    prediccion_mañana = modelo.predict(mañana)[0]
+                    
+                    st.success(f"💰 Predicción de ventas para mañana: **${prediccion_mañana:,.2f}**")
+
             else:
-                st.info("No hay datos para los filtros seleccionados.")
+                st.warning("⚠️ La IA necesita al menos 3 registros de ingresos para aprender.")
+
+            # --- TABLAS ---
+            st.divider()
+            st.subheader("📋 Detalle de Movimientos")
+            st.dataframe(df_filtrado)
 
         else:
             st.warning("Tu Excel está vacío.")
 
     except Exception as e:
         st.error(f"Error procesando datos: {e}")
-st.divider()
-st.subheader("🔮 Predicción de Ventas")
-
-if not df.empty and 'Fecha' in df.columns and 'Monto' in df.columns:
-    # 1. Preparamos los datos para la IA
-    # Filtramos solo Ingresos
-    df_ingresos = df[df['Tipo'] == 'Ingreso'].copy()
-    
-    # La IA no entiende fechas, entiende números. Convertimos fecha a "Día del año"
-    df_ingresos['Dia_Numero'] = df_ingresos['Fecha'].map(datetime.toordinal)
-    
-    X = df_ingresos[['Dia_Numero']] # Fechas (Input)
-    y = df_ingresos['Monto']        # Dinero (Output)
-    
-    if len(df_ingresos) > 5: # Necesitamos al menos 5 datos para aprender
-        # 2. Entrenamos al modelo
-        modelo = LinearRegression()
-        modelo.fit(X, y)
-        
-        # 3. Predecimos el futuro (ej: próximos 7 días)
-        ultimo_dia = df_ingresos['Dia_Numero'].max()
-        futuro_dias = np.array([ultimo_dia + i for i in range(1, 8)]).reshape(-1, 1)
-        prediccion = modelo.predict(futuro_dias)
-        
-        st.write(f"Según la tendencia, mañana venderás aprox: **${prediccion[0]:,.2f}**")
-    else:
-        st.info("Necesitas más datos históricos para hacer predicciones.")
 
 
 
