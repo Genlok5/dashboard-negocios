@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
 st.set_page_config(page_title="Monitor Negocios", layout="wide")
 st.title("📊 Monitor de Negocios")
@@ -40,4 +39,5 @@ if sh:
             
     except Exception as e:
         st.error(f"Error al leer los datos: {e}")
+
 
