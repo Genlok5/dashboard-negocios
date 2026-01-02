@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from datetime import datetime
 
-st.set_page_config(page_title="Monitor PRO + IA", layout="wide")
+st.set_page_config(page_title="Monitor PRO", layout="wide")
 st.title("📊 Monitor Financiero Inteligente")
 
 # --- CONEXIÓN ---
@@ -136,6 +136,7 @@ if sh:
 
     except Exception as e:
         st.error(f"Ocurrió un error: {e}")
+
 
 
 
