@@ -25,7 +25,7 @@ def conectar_google_sheets():
 
         # 4. Abrir la hoja
         # ⚠️ IMPORTANTE: Asegúrate de que tu archivo en Drive se llame EXACTAMENTE así:
-        sh = client.open("Mis Negocios Data") 
+        sh = client.open("Datos") 
         return sh
 
     except Exception as e:
@@ -66,4 +66,5 @@ if sh:
 
     except Exception as e:
         st.error(f"Error al leer la hoja: {e}")
+
 
