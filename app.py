@@ -1,47 +1,43 @@
 import streamlit as st
 import pandas as pd
 import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# Configuración de la página
-st.set_page_config(page_title="Mis 3 Negocios", layout="wide")
+st.set_page_config(page_title="Monitor Negocios", layout="wide")
+st.title("📊 Monitor de Negocios")
 
-# Título
-st.title("📊 Monitor de Negocios en Vivo")
-
-# CONEXIÓN (Modo Producción)
-try:
-    # Streamlit buscará las claves secretas en la nube, no en un archivo
-    gc = gspread.service_account_from_dict(st.secrets["gcp_service_account"])
-    
-    # CAMBIA ESTO POR EL NOMBRE EXACTO DE TU GOOGLE SHEET
-    sh = gc.open("Mis Negocios Data") 
-    
-    worksheet = sh.get_worksheet(0)
-    datos = worksheet.get_all_records()
-    df = pd.DataFrame(datos)
-
-    if not df.empty:
-        # Calcular totales (Asumiendo que tienes columnas 'Monto' y 'Tipo')
-        # Si tus columnas se llaman diferente, cambia 'Tipo' y 'Monto' aquí abajo
-        ingresos = df[df['Tipo'] == 'Ingreso']['Monto'].sum()
-        gastos = df[df['Tipo'] == 'Gasto']['Monto'].sum()
-        ganancia = ingresos - gastos
-
-        # Mostrar Tarjetas
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Ingresos", f"${ingresos:,.2f}")
-        col2.metric("Gastos", f"${gastos:,.2f}")
-        col3.metric("Ganancia Total", f"${ganancia:,.2f}")
-
-        # Mostrar Gráfica
-        st.subheader("Movimientos por Negocio")
-        st.bar_chart(df, x="Negocio", y="Monto")
+# Función de conexión con manejo de errores detallado
+def conectar_google_sheets():
+    try:
+        # Creamos una copia de los secretos para no modificar el original
+        secrets_dict = dict(st.secrets["gcp_service_account"])
         
-        # Mostrar Tabla
-        with st.expander("Ver detalle de datos"):
-            st.dataframe(df)
-    else:
-        st.warning("Tu hoja de cálculo está vacía.")
+        # Conexión directa
+        gc = gspread.service_account_from_dict(secrets_dict)
+        
+        # Intentar abrir la hoja
+        sh = gc.open("Mis Negocios Data") # <--- VERIFICA ESTE NOMBRE
+        return sh
+    except Exception as e:
+        st.error(f"❌ Error CRÍTICO de conexión: {e}")
+        return None
 
-except Exception as e:
-    st.error(f"Error de conexión: {e}")
+# Ejecutar conexión
+sh = conectar_google_sheets()
+
+if sh:
+    try:
+        worksheet = sh.get_worksheet(0)
+        datos = worksheet.get_all_records()
+        df = pd.DataFrame(datos)
+
+        if not df.empty:
+            st.success("✅ Conexión exitosa. Datos cargados.")
+            st.dataframe(df)
+            # Aquí irían tus gráficas...
+        else:
+            st.warning("La hoja está vacía.")
+            
+    except Exception as e:
+        st.error(f"Error al leer los datos: {e}")
+
