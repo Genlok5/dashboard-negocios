@@ -6,8 +6,8 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from datetime import datetime
 
-st.set_page_config(page_title="Monitor Inteligente", layout="wide")
-st.title("📊 Monitor de Negocios + IA 🧠")
+st.set_page_config(page_title="Monitor PRO + IA", layout="wide")
+st.title("📊 Monitor Financiero Inteligente")
 
 # --- CONEXIÓN ---
 def conectar_google_sheets():
@@ -34,87 +34,109 @@ if sh:
         df = pd.DataFrame(datos)
 
         if not df.empty:
-            # --- LIMPIEZA DE DATOS ---
+            # --- 1. LIMPIEZA DE DATOS ---
+            # Limpiamos símbolos de moneda
             if 'Monto' in df.columns:
                 df['Monto'] = df['Monto'].astype(str).str.replace('$', '').str.replace(',', '')
                 df['Monto'] = pd.to_numeric(df['Monto'])
             
+            # Formato de Fechas
             if 'Fecha' in df.columns:
                 df['Fecha'] = pd.to_datetime(df['Fecha'], dayfirst=True)
+                df['Mes'] = df['Fecha'].dt.strftime('%Y-%m') # Creamos columna Mes para filtrar
 
-            # --- DASHBOARD PRINCIPAL ---
-            # Filtro de Mes
-            df['Mes'] = df['Fecha'].dt.strftime('%Y-%m')
-            lista_meses = ["Todos"] + list(df['Mes'].unique())
+            # --- 2. BARRA LATERAL (FILTROS) ---
+            st.sidebar.header("🔍 Filtros")
+
+            # A. Filtro de Categoría / Negocio
+            # Detectamos si usas "Negocio" o "Categoría" en tu Excel
+            columna_filtro = 'Negocio' if 'Negocio' in df.columns else 'Categoría'
+            
+            lista_categorias = ["Todas"] + list(df[columna_filtro].unique())
+            cat_seleccionada = st.sidebar.selectbox(f"Filtrar por {columna_filtro}:", lista_categorias)
+
+            # B. Filtro de Mes
+            lista_meses = ["Todos"] + sorted(list(df['Mes'].unique()), reverse=True)
             mes_seleccionado = st.sidebar.selectbox("Filtrar por Mes:", lista_meses)
 
-            df_filtrado = df.copy()
+            # --- 3. APLICAR FILTROS ---
+            # Creamos dos copias de datos:
+            # df_ai -> Para la IA (Necesita TODA la historia de la categoría, no solo un mes)
+            # df_dashboard -> Para ver los números del mes seleccionado
+            
+            df_ai = df.copy()
+            df_dashboard = df.copy()
+
+            # Filtramos por Categoría en ambos
+            if cat_seleccionada != "Todas":
+                df_dashboard = df_dashboard[df_dashboard[columna_filtro] == cat_seleccionada]
+                df_ai = df_ai[df_ai[columna_filtro] == cat_seleccionada]
+
+            # Filtramos por Mes SOLO en el Dashboard (La IA necesita historia completa)
             if mes_seleccionado != "Todos":
-                df_filtrado = df_filtrado[df_filtrado['Mes'] == mes_seleccionado]
+                df_dashboard = df_dashboard[df_dashboard['Mes'] == mes_seleccionado]
 
-            # KPIs
-            ingresos = df_filtrado[df_filtrado['Tipo'] == 'Ingreso']['Monto'].sum()
-            gastos = df_filtrado[df_filtrado['Tipo'] == 'Gasto']['Monto'].sum()
-            balance = ingresos + gastos if gastos < 0 else ingresos - gastos
+            # --- 4. MOSTRAR KPIs (Del Mes Seleccionado) ---
+            st.subheader(f"Resumen: {mes_seleccionado} - {cat_seleccionada}")
+            
+            if not df_dashboard.empty:
+                ingresos = df_dashboard[df_dashboard['Tipo'] == 'Ingreso']['Monto'].sum()
+                gastos = df_dashboard[df_dashboard['Tipo'] == 'Gasto']['Monto'].sum()
+                balance = ingresos + gastos if gastos < 0 else ingresos - gastos
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Ingresos", f"${ingresos:,.2f}")
-            col2.metric("Gastos", f"${abs(gastos):,.2f}")
-            col3.metric("Balance", f"${balance:,.2f}")
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Ingresos", f"${ingresos:,.2f}")
+                col2.metric("Gastos", f"${abs(gastos):,.2f}")
+                col3.metric("Balance Neto", f"${balance:,.2f}")
+            else:
+                st.warning("No hay movimientos con estos filtros.")
 
             st.divider()
 
-            # --- SECCIÓN DE INTELIGENCIA ARTIFICIAL (NUEVO) ---
-            st.subheader("🔮 Oráculo de Predicción (IA)")
+            # --- 5. INTELIGENCIA ARTIFICIAL (Basada en la Categoría) ---
+            st.subheader(f"🔮 Oráculo IA ({cat_seleccionada})")
             
-            # Solo predecimos si hay suficientes datos de Ingresos
-            df_ia = df[df['Tipo'] == 'Ingreso'].copy()
-            
-            if len(df_ia) >= 3: # Necesitamos mínimo 3 ventas para calcular tendencia
-                # 1. Preparar datos: La IA no entiende fechas, entiende "Día 1, Día 2..."
-                # Convertimos fecha a número ordinal
-                df_ia['Fecha_Num'] = df_ia['Fecha'].map(datetime.toordinal)
-                
-                X = df_ia[['Fecha_Num']] # Eje X (Tiempo)
-                y = df_ia['Monto']       # Eje Y (Dinero)
+            # Solo analizamos Ingresos para predecir ventas
+            df_prediccion = df_ai[df_ai['Tipo'] == 'Ingreso'].copy()
 
-                # 2. Entrenar Modelo
+            if len(df_prediccion) >= 3:
+                # Preparamos datos matemáticos
+                df_prediccion['Fecha_Num'] = df_prediccion['Fecha'].map(datetime.toordinal)
+                X = df_prediccion[['Fecha_Num']]
+                y = df_prediccion['Monto']
+
                 modelo = LinearRegression()
                 modelo.fit(X, y)
-
-                # 3. Calcular la Tendencia (Coeficiente)
                 tendencia = modelo.coef_[0]
-                
-                col_ia1, col_ia2 = st.columns(2)
-                
-                with col_ia1:
-                    st.info(f"📈 Tendencia diaria detectada: **${tendencia:,.2f} / día**")
+
+                # Mostramos resultados
+                c1, c2 = st.columns(2)
+                with c1:
                     if tendencia > 0:
-                        st.write("Tu negocio está **creciendo** 🚀")
+                        st.success(f"📈 **Tendencia Positiva:** Estás creciendo aprox **${tendencia:,.2f}** por día en esta categoría.")
                     else:
-                        st.write("Tu negocio está **decreciendo** 📉. ¡Cuidado!")
-
-                with col_ia2:
-                    # 4. Predecir el futuro (Mañana)
-                    ultimo_dia_conocido = df_ia['Fecha_Num'].max()
-                    mañana = np.array([[ultimo_dia_conocido + 1]])
-                    prediccion_mañana = modelo.predict(mañana)[0]
-                    
-                    st.success(f"💰 Predicción de ventas para mañana: **${prediccion_mañana:,.2f}**")
-
+                        st.error(f"📉 **Tendencia Negativa:** Las ventas están bajando **${abs(tendencia):,.2f}** por día.")
+                
+                with c2:
+                    # Predicción para mañana
+                    ultimo_dia = df_prediccion['Fecha_Num'].max()
+                    mañana = np.array([[ultimo_dia + 1]])
+                    prediccion = modelo.predict(mañana)[0]
+                    st.info(f"💰 Se estima que mañana ingresarán: **${prediccion:,.2f}**")
             else:
-                st.warning("⚠️ La IA necesita al menos 3 registros de ingresos para aprender.")
+                st.info("💡 Necesito al menos 3 días de ventas históricas en esta categoría para poder predecir el futuro.")
 
-            # --- TABLAS ---
+            # --- 6. TABLA DETALLADA ---
             st.divider()
-            st.subheader("📋 Detalle de Movimientos")
-            st.dataframe(df_filtrado)
+            with st.expander("Ver Tabla de Datos Completa"):
+                st.dataframe(df_dashboard)
 
         else:
-            st.warning("Tu Excel está vacío.")
+            st.warning("Tu hoja de Google Sheets está vacía.")
 
     except Exception as e:
-        st.error(f"Error procesando datos: {e}")
+        st.error(f"Ocurrió un error: {e}")
+
 
 
 
