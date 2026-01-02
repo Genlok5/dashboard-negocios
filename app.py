@@ -8,31 +8,21 @@ st.title("📊 Monitor de Negocios en Vivo")
 
 def conectar_google_sheets():
     try:
-        # 1. Cargar secretos y corregir formato de llave
         secretos = dict(st.secrets["gcp_service_account"])
         if "private_key" in secretos:
             secretos["private_key"] = secretos["private_key"].replace("\\n", "\n")
 
-        # 2. Definir alcance (Scope)
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-
-        # 3. Autenticar
+        scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(secretos, scopes=scopes)
         client = gspread.authorize(creds)
-
-        # 4. Abrir la hoja
-        # ⚠️ IMPORTANTE: Asegúrate de que tu archivo en Drive se llame EXACTAMENTE así:
+        
+        # Asegúrate que este nombre sea correcto
         sh = client.open("Datos") 
         return sh
-
     except Exception as e:
         st.error(f"❌ Error al conectar: {e}")
         return None
 
-# Ejecutar la app
 sh = conectar_google_sheets()
 
 if sh:
@@ -42,29 +32,36 @@ if sh:
         df = pd.DataFrame(datos)
 
         if not df.empty:
-            # --- MÉTRICAS ---
-            # Intentamos calcular totales si existen las columnas 'Monto' y 'Tipo'
-            # Si tus columnas tienen otros nombres, el código seguirá funcionando mostrando solo la tabla
+            # --- LIMPIEZA DE DATOS (NUEVO) ---
+            # Si la columna Monto existe, le quitamos el signo $ y las comas
+            if 'Monto' in df.columns:
+                # Convertimos a texto, quitamos '$' y ',', y luego a número
+                df['Monto'] = df['Monto'].astype(str).str.replace('$', '').str.replace(',', '')
+                df['Monto'] = pd.to_numeric(df['Monto'])
+
+            # --- CÁLCULOS ---
             if 'Monto' in df.columns and 'Tipo' in df.columns:
                 ingresos = df[df['Tipo'] == 'Ingreso']['Monto'].sum()
-                gastos = df[df['Tipo'] == 'Gasto']['Monto'].sum()
-                ganancia = ingresos - gastos # Resta simple (Ingresos - Gastos absolutos)
+                # Sumamos los gastos (asumiendo que en Excel ya pusiste el signo negativo o positivo)
+                # Si en tu excel los gastos son positivos (ej: 500), cámbialo a resta.
+                # Si son negativos (ej: -500), usa suma.
+                gastos = df[df['Tipo'] == 'Gasto']['Monto'].sum() 
                 
-                # Para mostrarlo bien, a veces los gastos se registran negativos. 
-                # Si en tu Excel los gastos son negativos (ej: -500), la fórmula sería suma directa.
-                # Aquí asumo que son positivos y los restamos.
-                
+                # Cálculo de ganancia
+                ganancia = ingresos + gastos if gastos < 0 else ingresos - gastos
+
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Ingresos Totales", f"${ingresos:,.2f}")
-                col2.metric("Gastos Totales", f"${gastos:,.2f}")
-                col3.metric("Balance", f"${(ingresos - gastos):,.2f}")
+                col2.metric("Gastos Totales", f"${abs(gastos):,.2f}") # abs() para mostrarlo positivo
+                col3.metric("Balance", f"${ganancia:,.2f}")
             
             st.subheader("📋 Detalle de Movimientos")
             st.dataframe(df)
         else:
-            st.warning("La hoja está vacía. Agrega datos en tu Google Sheet.")
+            st.warning("La hoja está vacía.")
 
     except Exception as e:
-        st.error(f"Error al leer la hoja: {e}")
+        st.error(f"Error al procesar datos: {e}")
+
 
 
