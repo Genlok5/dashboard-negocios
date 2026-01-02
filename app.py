@@ -1,57 +1,45 @@
 import streamlit as st
-import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(page_title="Monitor Negocios", layout="wide")
-st.title("📊 Monitor de Negocios")
+st.title("🛠️ Prueba de Diagnóstico")
 
-def conectar_google_sheets():
+def probar_conexion():
     try:
-        # 1. Recuperamos los secretos
+        # 1. Cargar secretos
         secretos = dict(st.secrets["gcp_service_account"])
-
-        # 2. TRUCO DE LIMPIEZA: Forzamos el formato correcto de la llave
-        # Esto arregla el error <Response [200]> causado por saltos de línea rotos
+        
+        # Corrección de formato de llave
         if "private_key" in secretos:
             secretos["private_key"] = secretos["private_key"].replace("\\n", "\n")
 
-        # 3. Definimos los permisos
+        # 2. Definir alcance
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive"
         ]
 
-        # 4. Conectamos
+        # 3. Autenticar
         creds = Credentials.from_service_account_info(secretos, scopes=scopes)
         client = gspread.authorize(creds)
 
-        # 5. Abrimos la hoja
-        # IMPORTANTE: Verifica que este nombre sea IDÉNTICO a tu archivo en Drive
-        sh = client.open("Mis Negocios Data") 
-        return sh
-
-    except Exception as e:
-        st.error(f"❌ Error detallado: {e}")
-        return None
-
-# Ejecutamos
-sh = conectar_google_sheets()
-
-if sh:
-    try:
-        worksheet = sh.get_worksheet(0)
-        datos = worksheet.get_all_records()
-        df = pd.DataFrame(datos)
-
-        if not df.empty:
-            st.success("✅ ¡Conexión Exitosa!")
-            st.dataframe(df)
+        # 4. PRUEBA DE FUEGO: Listar archivos
+        st.info("Intentando listar tus hojas de cálculo...")
+        archivos = client.list_spreadsheet_files()
+        
+        if archivos:
+            st.success(f"✅ ¡ÉXITO! El robot ve {len(archivos)} archivos.")
+            st.write("Estos son los archivos que puede ver:")
+            for f in archivos:
+                st.code(f"Nombre: {f['name']} | ID: {f['id']}")
         else:
-            st.warning("La hoja está vacía.")
+            st.warning("⚠️ Conexión exitosa, pero el robot no ve ningún archivo. ¿Compartiste el Excel con su email?")
+            st.write(f"Email del robot: {secretos.get('client_email')}")
 
     except Exception as e:
-        st.error(f"Error al leer datos: {e}")
+        st.error("❌ Falló la conexión.")
+        st.write(f"Tipo de error: {type(e).__name__}")
+        st.write(f"Mensaje de error: {e}")
 
-
-
+if st.button("Correr Diagnóstico"):
+    probar_conexion()
